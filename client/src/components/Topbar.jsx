@@ -9,7 +9,6 @@ import {
   Menu,
   Moon,
   PackageX,
-  Settings,
   ShieldCheck,
   Sun,
   UserRound,
@@ -37,15 +36,19 @@ export function Topbar({ onMenuClick, notifications, onRefreshNotifications }) {
 
   useEffect(() => {
     const handleClick = (event) => {
-      if (notifRef.current && !notifRef.current.contains(event.target)) {
-                setOpenMenu((current) => (current === 'notifications' ? null : current));
-      }
-      if (userRef.current && !userRef.current.contains(event.target)) {
-        setOpenMenu((current) => (current === 'user' ? null : current));
-      }
+      const insideNotifications = notifRef.current?.contains(event.target);
+      const insideUser = userRef.current?.contains(event.target);
+      if (!insideNotifications && !insideUser) setOpenMenu(null);
+    };
+    const handleKey = (event) => {
+      if (event.key === 'Escape') setOpenMenu(null);
     };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, []);
 
   const toggle = (menu) => setOpenMenu((current) => (current === menu ? null : menu));
@@ -206,14 +209,11 @@ export function Topbar({ onMenuClick, notifications, onRefreshNotifications }) {
                 <small style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)' }}>@{user?.username}</small>
                 <span className="badge badge-orange no-dot" style={{ marginTop: 6 }}>{user?.role}</span>
               </div>
-              <button type="button" className="dropdown-item" onClick={() => navigate('/settings')}>
-                <UserRound size={15} /> My profile
-              </button>
-              <button type="button" className="dropdown-item" onClick={() => navigate('/settings')}>
-                <Settings size={15} /> Settings
+              <button type="button" className="dropdown-item" role="menuitem" onClick={() => { navigate('/settings'); setOpenMenu(null); }}>
+                <UserRound size={15} /> Profile
               </button>
               <div className="dropdown-sep" />
-              <button type="button" className="dropdown-item danger" onClick={logout}>
+              <button type="button" className="dropdown-item danger" role="menuitem" onClick={() => { setOpenMenu(null); logout(); }}>
                 <LogOut size={15} /> Log out
               </button>
             </div>

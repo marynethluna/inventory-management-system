@@ -65,10 +65,10 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={user ? <Navigate to="/" replace /> : <Login />}
-      />
+      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/signup" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route
         element={
           <RequireAuth>
@@ -78,8 +78,8 @@ function AppRoutes() {
       >
         <Route path="/" element={<Dashboard />} />
         <Route path="/inventory" element={<Inventory />} />
-        <Route path="/transactions" element={<Transactions />} />
-        <Route path="/borrowing" element={<Borrowing />} />
+        <Route path="/transactions" element={<RequirePermission permission="transactions:read"><Transactions /></RequirePermission>} />
+        <Route path="/borrowing" element={<RequirePermission permission="borrows:read"><Borrowing /></RequirePermission>} />
         <Route path="/categories" element={<Categories />} />
         <Route path="/reports" element={<Reports />} />
         <Route

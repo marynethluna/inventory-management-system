@@ -18,7 +18,7 @@ const stockTransactionSchema = new mongoose.Schema(
     supplier: { type: String, trim: true, maxlength: [120, 'Supplier cannot exceed 120 characters'], default: '' },
     reason: { type: String, trim: true, maxlength: [160, 'Reason cannot exceed 160 characters'], default: '' },
     remarks: { type: String, trim: true, maxlength: [300, 'Remarks cannot exceed 300 characters'], default: '' },
-    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   {
     timestamps: true,

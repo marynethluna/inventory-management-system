@@ -3,9 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Archive,
   ArchiveRestore,
-  ArrowDownToLine,
   ArrowLeftRight,
-  ArrowUpFromLine,
   Boxes,
   Eye,
   FilterX,
@@ -22,20 +20,21 @@ import { useToast } from '../context/ToastContext';
 import { PageHeader, StatCard, StatusBadge, EmptyState, LoadingState, Pagination, SectionCard } from '../components/common';
 import { ConditionBadge } from '../components/badges';
 import { Modal } from '../components/Modal';
+import { StockMovementModal } from '../components/StockMovementModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CONDITIONS, LOCATIONS, UNITS } from '../utils/constants';
-import { formatDate, formatNumber, todayISO } from '../utils/format';
+import { formatDate, formatNumber } from '../utils/format';
 import { can } from '../utils/permissions';
 
 const LIMIT = 12;
 
-function ItemForm({ open, onClose, item, categories, onSaved }) {
+function ItemForm({ open, onClose, item, categories, onSaved, units, defaultMinimumStock }) {
   const empty = {
     name: '',
     categoryId: categories[0]?.id || '',
     quantity: 0,
-    unit: 'pcs',
-    minimumStock: 1,
+    unit: units[0] || 'pcs',
+    minimumStock: defaultMinimumStock,
     location: '',
     condition: 'Good',
     description: '',
@@ -64,7 +63,7 @@ function ItemForm({ open, onClose, item, categories, onSaved }) {
     setErrors({});
     setServerError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, item]);
+  }, [open, item, categories, units, defaultMinimumStock]);
 
   const update = (field) => (event) => {
     const value = event.target.value;
@@ -76,8 +75,8 @@ function ItemForm({ open, onClose, item, categories, onSaved }) {
     const next = {};
     if (!form.name.trim() || form.name.trim().length < 2) next.name = 'Enter an item name (at least 2 characters).';
     if (!form.categoryId) next.categoryId = 'Select a category.';
-    if (form.quantity === '' || Number(form.quantity) < 0 || !Number.isInteger(Number(form.quantity))) next.quantity = 'Quantity must be a whole number of 0 or more.';
-    if (form.minimumStock === '' || Number(form.minimumStock) < 0 || !Number.isInteger(Number(form.minimumStock))) next.minimumStock = 'Minimum level must be a whole number of 0 or more.';
+    if (form.quantity === '' || Number(form.quantity) < 0 || Number(form.quantity) > 1_000_000 || !Number.isInteger(Number(form.quantity))) next.quantity = 'Quantity must be a whole number from 0 to 1,000,000.';
+    if (form.minimumStock === '' || Number(form.minimumStock) < 0 || Number(form.minimumStock) > 1_000_000 || !Number.isInteger(Number(form.minimumStock))) next.minimumStock = 'Minimum level must be a whole number from 0 to 1,000,000.';
     if (!form.unit.trim()) next.unit = 'Unit is required.';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -160,7 +159,7 @@ function ItemForm({ open, onClose, item, categories, onSaved }) {
           {!item && (
             <div className="field">
               <label htmlFor="item-quantity">Initial quantity <span className="req">*</span></label>
-              <input id="item-quantity" type="number" min={0} step={1} className={`input ${errors.quantity ? 'invalid' : ''}`} value={form.quantity} onChange={update('quantity')} />
+              <input id="item-quantity" type="number" min={0} max={1_000_000} step={1} className={`input ${errors.quantity ? 'invalid' : ''}`} value={form.quantity} onChange={update('quantity')} />
               <span className="field-hint">Opening stock is recorded as a Stock In transaction.</span>
               {errors.quantity && <span className="field-error">{errors.quantity}</span>}
             </div>
@@ -168,13 +167,13 @@ function ItemForm({ open, onClose, item, categories, onSaved }) {
           <div className="field">
             <label htmlFor="item-unit">Unit of measurement <span className="req">*</span></label>
             <select id="item-unit" className={`select ${errors.unit ? 'invalid' : ''}`} value={form.unit} onChange={update('unit')}>
-              {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+              {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
             </select>
             {errors.unit && <span className="field-error">{errors.unit}</span>}
           </div>
           <div className="field">
             <label htmlFor="item-minimum">Minimum stock level <span className="req">*</span></label>
-            <input id="item-minimum" type="number" min={0} step={1} className={`input ${errors.minimumStock ? 'invalid' : ''}`} value={form.minimumStock} onChange={update('minimumStock')} />
+            <input id="item-minimum" type="number" min={0} max={1_000_000} step={1} className={`input ${errors.minimumStock ? 'invalid' : ''}`} value={form.minimumStock} onChange={update('minimumStock')} />
             <span className="field-hint">Low-stock alerts trigger at or below this level.</span>
             {errors.minimumStock && <span className="field-error">{errors.minimumStock}</span>}
           </div>
@@ -202,110 +201,6 @@ function ItemForm({ open, onClose, item, categories, onSaved }) {
   );
 }
 
-function StockModal({ open, onClose, item, onSaved }) {
-  const [type, setType] = useState('Stock In');
-  const [form, setForm] = useState({ quantity: 1, date: todayISO(), supplier: '', reason: '', remarks: '' });
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setType('Stock In');
-      setForm({ quantity: 1, date: todayISO(), supplier: '', reason: '', remarks: '' });
-      setError('');
-    }
-  }, [open, item]);
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setError('');
-    if (!Number.isInteger(Number(form.quantity)) || Number(form.quantity) < 1) {
-      setError('Enter a whole quantity of at least 1.');
-      return;
-    }
-    if (type === 'Stock Out' && Number(form.quantity) > item.quantity) {
-      setError(`Only ${item.quantity} ${item.unit} available for ${item.name}.`);
-      return;
-    }
-    if (type === 'Stock Out' && !form.reason.trim()) {
-      setError('Provide a reason for releasing the stock.');
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.post('/transactions', {
-        type,
-        itemId: item.id,
-        quantity: Number(form.quantity),
-        date: form.date,
-        supplier: form.supplier,
-        reason: form.reason,
-        remarks: form.remarks,
-      });
-      onSaved(type === 'Stock In' ? 'Stock in recorded.' : 'Stock out recorded.');
-      onClose();
-    } catch (err) {
-      setError(err.message || 'Unable to record the transaction.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Record stock movement"
-      description={`${item?.itemCode} · ${item?.name} — ${formatNumber(item?.quantity)} ${item?.unit} available`}
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" form="stock-form" className="btn btn-primary" disabled={saving}>
-            {saving && <span className="spinner" />} Save transaction
-          </button>
-        </>
-      }
-    >
-      <form id="stock-form" onSubmit={submit} noValidate>
-        <div className="chip-row" style={{ marginBottom: 14 }}>
-          <button type="button" className={`chip ${type === 'Stock In' ? 'active' : ''}`} onClick={() => setType('Stock In')}>
-            <ArrowDownToLine size={13} /> Stock in
-          </button>
-          <button type="button" className={`chip ${type === 'Stock Out' ? 'active' : ''}`} onClick={() => setType('Stock Out')}>
-            <ArrowUpFromLine size={13} /> Stock out
-          </button>
-        </div>
-        <div className="form-grid">
-          <div className="field">
-            <label htmlFor="stock-qty">Quantity <span className="req">*</span></label>
-            <input id="stock-qty" type="number" min={1} step={1} className="input" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} />
-          </div>
-          <div className="field">
-            <label htmlFor="stock-date">Transaction date</label>
-            <input id="stock-date" type="date" className="input" value={form.date} max={todayISO()} onChange={(event) => setForm({ ...form, date: event.target.value })} />
-          </div>
-          {type === 'Stock In' ? (
-            <div className="field span-2">
-              <label htmlFor="stock-supplier">Supplier / source</label>
-              <input id="stock-supplier" className="input" value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="e.g. National Book Store" maxLength={120} />
-            </div>
-          ) : (
-            <div className="field span-2">
-              <label htmlFor="stock-reason">Reason for releasing <span className="req">*</span></label>
-              <input id="stock-reason" className="input" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} placeholder="e.g. Classroom distribution" maxLength={160} />
-            </div>
-          )}
-          <div className="field span-2">
-            <label htmlFor="stock-remarks">Remarks</label>
-            <textarea id="stock-remarks" className="textarea" rows={2} value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} placeholder="Optional notes" maxLength={300} />
-          </div>
-        </div>
-        {error && <div className="login-error" style={{ marginTop: 12 }}>{error}</div>}
-      </form>
-    </Modal>
-  );
-}
-
 export default function Inventory() {
   const { user } = useAuth();
   const toast = useToast();
@@ -322,6 +217,8 @@ export default function Inventory() {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [data, setData] = useState(null);
   const [categories, setCategories] = useState([]);
+  const [units, setUnits] = useState(UNITS);
+  const [defaultMinimumStock, setDefaultMinimumStock] = useState(5);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -329,10 +226,12 @@ export default function Inventory() {
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [stockItem, setStockItem] = useState(null);
+  const [movementItems, setMovementItems] = useState([]);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
 
   const isStaff = can(user?.role, 'inventory:update');
+  const canRecordStock = can(user?.role, 'transactions:create');
   const isAdmin = user?.role === 'Administrator';
 
   useEffect(() => {
@@ -347,7 +246,21 @@ export default function Inventory() {
 
   useEffect(() => {
     api.get('/categories').then((result) => setCategories(result.categories)).catch(() => setCategories([]));
+    api.get('/settings').then((result) => {
+      setUnits(result.settings.units?.length ? result.settings.units : UNITS);
+      setDefaultMinimumStock(result.settings.defaultMinimumStock ?? 5);
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (stockItem) {
+      api.get('/items', { limit: 100 })
+        .then((result) => { if (active) setMovementItems(result.items); })
+        .catch(() => { if (active) setMovementItems([]); });
+    }
+    return () => { active = false; };
+  }, [stockItem?.id]);
 
   useEffect(() => {
     let active = true;
@@ -562,8 +475,8 @@ export default function Inventory() {
                           <button type="button" className="icon-btn" title="View details" aria-label={`View ${item.name}`} onClick={() => setViewing(item)}>
                             <Eye size={14} />
                           </button>
-                          {isStaff && item.isActive && (
-                            <button type="button" className="icon-btn" title="Record stock movement" aria-label={`Record stock for ${item.name}`} onClick={() => setStockItem(item)}>
+                          {canRecordStock && item.isActive && (
+                            <button type="button" className="icon-btn" title="Edit Stock" aria-label={`Edit Stock for ${item.name}`} onClick={() => setStockItem(item)}>
                               <ArrowLeftRight size={14} />
                             </button>
                           )}
@@ -599,10 +512,20 @@ export default function Inventory() {
         onClose={() => setFormOpen(false)}
         item={editing}
         categories={categories}
+        units={units}
+        defaultMinimumStock={defaultMinimumStock}
         onSaved={handleSaved}
       />
 
-      <StockModal open={Boolean(stockItem)} onClose={() => setStockItem(null)} item={stockItem} onSaved={handleSaved} />
+      {canRecordStock && (
+        <StockMovementModal
+          open={Boolean(stockItem)}
+          onClose={() => setStockItem(null)}
+          items={movementItems}
+          initialItem={stockItem}
+          onSaved={handleSaved}
+        />
+      )}
 
       <Modal
         open={Boolean(viewing)}
@@ -613,9 +536,9 @@ export default function Inventory() {
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setViewing(null)}>Close</button>
-            {isStaff && viewing?.isActive && (
+            {canRecordStock && viewing?.isActive && (
               <button type="button" className="btn btn-secondary" onClick={() => { setStockItem(viewing); setViewing(null); }}>
-                <ArrowLeftRight size={14} /> Stock movement
+                <ArrowLeftRight size={14} /> Edit Stock
               </button>
             )}
             {isStaff && (

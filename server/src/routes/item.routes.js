@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { body, param, query } from 'express-validator';
-import { Item, CONDITIONS, UNITS } from '../models/Item.js';
+import { Item, CONDITIONS } from '../models/Item.js';
 import { Category } from '../models/Category.js';
 import { BorrowRecord } from '../models/BorrowRecord.js';
 import { StockTransaction } from '../models/StockTransaction.js';
@@ -10,6 +11,7 @@ import { validate } from '../middleware/validate.js';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../utils/ApiError.js';
 import { toItemDTO, toTransactionDTO } from '../utils/serialize.js';
 import { logActivity } from '../utils/activity.js';
+import { getSystemSettings } from '../models/SystemSetting.js';
 import { escapeRegex, parsePagination } from '../utils/query.js';
 
 const router = Router();
@@ -169,57 +171,66 @@ router.post(
     body('description').optional({ values: 'falsy' }).isString().isLength({ max: 500 }),
     body('quantity').isInt({ min: 0, max: 1000000 }).withMessage('Quantity must be a whole number of 0 or more.'),
     body('unit').isString().trim().isLength({ min: 1, max: 20 }).withMessage('Unit of measurement is required.'),
-    body('minimumStock').isInt({ min: 0, max: 1000000 }).withMessage('Minimum stock level must be 0 or more.'),
+    body('minimumStock').optional().isInt({ min: 0, max: 1000000 }).withMessage('Minimum stock level must be 0 or more.'),
     body('location').optional({ values: 'falsy' }).isString().isLength({ max: 80 }),
     body('condition').optional().isString().isIn(CONDITIONS),
   ]),
   asyncHandler(async (req, res) => {
-    const { name, categoryId, description = '', quantity, unit, minimumStock, location = '', condition = 'Good' } = req.body;
+    const { name, categoryId, description = '', quantity, unit, location = '', condition = 'Good' } = req.body;
+    const settings = await getSystemSettings();
+    const normalizedUnit = String(unit || '').trim();
+    const minimumStock = req.body.minimumStock === undefined ? settings.defaultMinimumStock : Number(req.body.minimumStock);
+    if (!settings.units.includes(normalizedUnit)) throw badRequest('Select a valid unit of measurement from the configured units.');
 
-    const category = await Category.findById(categoryId);
-    if (!category) throw badRequest('The selected category does not exist.');
-
-    const duplicate = await Item.findOne({
-      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
-      category: categoryId,
-      isActive: true,
-    });
-    if (duplicate) throw conflict(`"${name}" already exists in ${category.name}.`);
-
-    const itemCode = await nextSequence('itemCode', 'INV-', 4);
-    const item = await Item.create({
-      itemCode,
-      name,
-      category: categoryId,
-      description,
-      quantity,
-      unit,
-      minimumStock,
-      location,
-      condition,
-      createdBy: req.user._id,
-      updatedBy: req.user._id,
-    });
-
+    const initialQuantity = Number(quantity);
+    let category;
+    let item;
     let initialTransaction = null;
-    if (quantity > 0) {
-      try {
-        const reference = await nextSequence('transaction', 'TXN-', 5);
-        initialTransaction = await StockTransaction.create({
-          reference,
-          type: 'Stock In',
-          item: item._id,
-          quantity,
-          balanceAfter: quantity,
-          date: new Date(),
-          supplier: 'Initial stock',
-          remarks: 'Opening balance recorded when the item was added.',
-          recordedBy: req.user._id,
-        });
-      } catch (error) {
-        await item.deleteOne();
-        throw error;
-      }
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        category = await Category.findById(categoryId).session(session);
+        if (!category) throw badRequest('The selected category does not exist.');
+
+        const duplicate = await Item.findOne({
+          name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+          category: categoryId,
+          isActive: true,
+        }).session(session);
+        if (duplicate) throw conflict(`"${name}" already exists in ${category.name}.`);
+
+        const itemCode = await nextSequence('itemCode', 'INV-', 4, session);
+        item = await new Item({
+          itemCode,
+          name,
+          category: categoryId,
+          description,
+          quantity: initialQuantity,
+          unit: normalizedUnit,
+          minimumStock,
+          location,
+          condition,
+          createdBy: req.user._id,
+          updatedBy: req.user._id,
+        }).save({ session });
+
+        if (initialQuantity > 0) {
+          const reference = await nextSequence('transaction', 'TXN-', 5, session);
+          [initialTransaction] = await StockTransaction.create([{
+            reference,
+            type: 'Stock In',
+            item: item._id,
+            quantity: initialQuantity,
+            balanceAfter: initialQuantity,
+            date: new Date(),
+            supplier: 'Initial stock',
+            remarks: 'Opening balance recorded when the item was added.',
+            recordedBy: req.user._id,
+          }], { session });
+        }
+      });
+    } finally {
+      await session.endSession();
     }
 
     await logActivity({
@@ -229,7 +240,7 @@ router.post(
       entityType: 'Item',
       entityId: item._id.toString(),
       entityLabel: `${item.itemCode} · ${item.name}`,
-      details: `Initial quantity ${quantity} ${unit} in ${category.name}`,
+      details: `Initial quantity ${initialQuantity} ${normalizedUnit} in ${category.name}`,
     });
 
     res.status(201).json({
@@ -277,7 +288,12 @@ router.patch(
       item.name = req.body.name;
     }
     if (req.body.description !== undefined) item.description = req.body.description;
-    if (req.body.unit !== undefined) item.unit = req.body.unit;
+    if (req.body.unit !== undefined) {
+      const settings = await getSystemSettings();
+      const unit = String(req.body.unit).trim();
+      if (!settings.units.includes(unit)) throw badRequest('Select a valid unit of measurement from the configured units.');
+      item.unit = unit;
+    }
     if (req.body.minimumStock !== undefined) item.minimumStock = req.body.minimumStock;
     if (req.body.location !== undefined) item.location = req.body.location;
     if (req.body.condition !== undefined) item.condition = req.body.condition;
@@ -356,7 +372,8 @@ router.get(
   '/meta/units',
   requirePermission('inventory:read'),
   asyncHandler(async (_req, res) => {
-    res.json({ units: UNITS, conditions: CONDITIONS });
+    const settings = await getSystemSettings();
+    res.json({ units: settings.units, conditions: CONDITIONS });
   })
 );
 

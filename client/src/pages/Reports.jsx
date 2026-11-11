@@ -14,7 +14,6 @@ import {
   PackageX,
   Printer,
   Search,
-  Undo2,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -34,7 +33,6 @@ const TYPE_ICONS = {
   borrows: ClipboardList,
   transactions: ArrowLeftRight,
 };
-
 const SUMMARY_LABELS = {
   totalItems: 'Total items',
   totalQuantity: 'Total quantity',
@@ -48,7 +46,6 @@ const SUMMARY_LABELS = {
   overdue: 'Overdue',
   returned: 'Returned',
 };
-
 const DATE_KEYS = new Set(['date', 'dateAdded', 'lastUpdated', 'dateBorrowed', 'expectedReturnDate', 'actualReturnDate']);
 
 function renderCell(row, column) {
@@ -57,7 +54,7 @@ function renderCell(row, column) {
   if (column.key === 'displayStatus') return <BorrowStatusBadge status={value} />;
   if (column.key === 'type') return <TransactionTypeBadge type={value} />;
   if (column.key === 'recordedBy') return value?.name || '—';
-  if (column.key === 'quantity' || column.key === 'balanceAfter' || column.key === 'minimumStock') return formatNumber(value);
+  if (['quantity', 'balanceAfter', 'minimumStock'].includes(column.key)) return formatNumber(value);
   if (DATE_KEYS.has(column.key)) return formatDate(value);
   if (value === null || value === undefined || value === '') return '—';
   return String(value);
@@ -89,48 +86,37 @@ export default function Reports() {
   }, [type, filters]);
 
   useEffect(() => {
-    const timer = setTimeout(load, 200);
+    const timer = setTimeout(load, 180);
     return () => clearTimeout(timer);
   }, [load]);
 
   const activeType = REPORT_TYPES.find((entry) => entry.value === type);
   const rows = data?.rows || [];
   const columns = data?.columns || [];
-  const summary = data?.summary || {};
-
   const summaryItems = useMemo(
-    () =>
-      Object.entries(summary)
-        .filter(([, value]) => typeof value === 'number')
-        .map(([key, value]) => ({ label: SUMMARY_LABELS[key] || key, value: formatNumber(value) })),
-    [summary]
+    () => Object.entries(data?.summary || {})
+      .filter(([, value]) => typeof value === 'number')
+      .map(([key, value]) => ({ label: SUMMARY_LABELS[key] || key, value: formatNumber(value) })),
+    [data?.summary]
   );
-
   const subtitle = useMemo(() => {
     const parts = [];
     if (filters.from || filters.to) parts.push(`Period: ${filters.from ? formatDate(filters.from) : 'start'} – ${filters.to ? formatDate(filters.to) : 'today'}`);
     else parts.push('All dates');
     if (filters.category) parts.push(`Category: ${filters.category}`);
-    if (filters.search) parts.push(`Search: "${filters.search}"`);
+    if (filters.search) parts.push(`Search: “${filters.search}”`);
     return parts.join(' · ');
   }, [filters]);
-
   const fileBase = `inventory-${type}-${todayISO()}`;
 
   const handleExportCSV = () => {
-    if (!rows.length) {
-      toast.error('There are no records to export.');
-      return;
-    }
+    if (!rows.length) return toast.error('There are no records to export.');
     exportCSV(`${fileBase}.csv`, columns, rows);
     toast.success('CSV report downloaded.');
   };
 
   const handleExportPDF = async () => {
-    if (!rows.length) {
-      toast.error('There are no records to export.');
-      return;
-    }
+    if (!rows.length) return toast.error('There are no records to export.');
     try {
       await exportPDF({
         filename: `${fileBase}.pdf`,
@@ -147,131 +133,82 @@ export default function Reports() {
   };
 
   const handlePrint = () => {
-    if (!rows.length) {
-      toast.error('There are no records to print.');
-      return;
-    }
+    if (!rows.length) return toast.error('There are no records to print.');
     window.print();
   };
+  const clearFilters = () => setFilters({ from: '', to: '', category: '', search: '' });
 
   return (
-    <>
-      <PageHeader
-        title="Reports"
-        description="Generate inventory and transaction reports, then print or export them for filing and review."
-      >
-        <button type="button" className="btn btn-secondary no-print" onClick={handleExportCSV}>
-          <FileSpreadsheet size={15} /> Export CSV
-        </button>
-        <button type="button" className="btn btn-secondary no-print" onClick={handleExportPDF}>
-          <Download size={15} /> Export PDF
-        </button>
-        <button type="button" className="btn btn-primary no-print" onClick={handlePrint}>
-          <Printer size={15} /> Print
-        </button>
-      </PageHeader>
+    <div className="reports-layout">
+      <div className="reports-controls">
+        <PageHeader title="Reports" description="Generate school inventory reports, then print or export them for review and filing.">
+          <button type="button" className="btn btn-secondary no-print" onClick={handleExportCSV}><FileSpreadsheet size={15} /> Export CSV</button>
+          <button type="button" className="btn btn-secondary no-print" onClick={handleExportPDF}><Download size={15} /> Export PDF</button>
+          <button type="button" className="btn btn-primary no-print" onClick={handlePrint}><Printer size={15} /> Print</button>
+        </PageHeader>
 
-      <SectionCard className="no-print" title="Report type" description="Choose the report you want to generate" icon={FileBarChart2}>
-        <div className="report-types">
-          {REPORT_TYPES.map((entry) => {
-            const Icon = TYPE_ICONS[entry.value] || FileBarChart2;
-            return (
-              <button type="button" key={entry.value} className={`report-type ${type === entry.value ? 'active' : ''}`} onClick={() => setType(entry.value)}>
-                <span className="rt-icon"><Icon size={15} /></span>
-                <span>
-                  <b>{entry.label}</b>
-                  <small>{entry.description}</small>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </SectionCard>
-
-      <SectionCard className="no-print" style={{ marginTop: 14 }}>
-        <div className="filters" style={{ borderBottom: 'none', padding: 0 }}>
-          <div className="input-icon-wrap search">
-            <Search size={15} />
-            <input className="input" placeholder="Search item, borrower, reference…" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} aria-label="Search report" />
+        <SectionCard className="no-print report-type-card" title="Report type" description="Choose the report you want to generate" icon={FileBarChart2}>
+          <div className="report-types">
+            {REPORT_TYPES.map((entry) => {
+              const Icon = TYPE_ICONS[entry.value] || FileBarChart2;
+              return (
+                <button type="button" key={entry.value} className={`report-type ${type === entry.value ? 'active' : ''}`} onClick={() => setType(entry.value)} aria-pressed={type === entry.value}>
+                  <span className="rt-icon"><Icon size={15} /></span>
+                  <span><b>{entry.label}</b><small>{entry.description}</small></span>
+                </button>
+              );
+            })}
           </div>
-          <input type="date" className="input" style={{ width: 'auto' }} value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} aria-label="Report from date" />
-          <input type="date" className="input" style={{ width: 'auto' }} value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} aria-label="Report to date" />
-          <select className="select" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })} aria-label="Filter by category">
-            <option value="">All categories</option>
-            {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
-          </select>
-          {(filters.search || filters.from || filters.to || filters.category) && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilters({ from: '', to: '', category: '', search: '' })}>
-              <FilterX size={14} /> Clear
-            </button>
-          )}
-          <div className="spacer" />
-          <span className="filter-count">{loading ? 'Generating…' : `${rows.length} record(s)`}</span>
-        </div>
-      </SectionCard>
+        </SectionCard>
 
-      <SectionCard className="flush" style={{ marginTop: 14 }}>
-        <div className="report-title">
-          <div className="row" style={{ justifyContent: 'space-between', gap: 10 }}>
-            <div>
-              <h2>{activeType?.label}</h2>
-              <p>{subtitle}</p>
-            </div>
-            <span className="badge badge-neutral no-dot">Generated {formatDate(new Date())}</span>
+        <SectionCard className="no-print report-filter-card">
+          <div className="filters report-filters">
+            <div className="input-icon-wrap search"><Search size={15} /><input className="input" placeholder="Search item, borrower or reference…" value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} aria-label="Search report" /></div>
+            <input type="date" className="input report-date-input" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} aria-label="Report from date" />
+            <input type="date" className="input report-date-input" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} aria-label="Report to date" />
+            <select className="select" value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })} aria-label="Filter by category">
+              <option value="">All categories</option>
+              {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
+            </select>
+            {(filters.search || filters.from || filters.to || filters.category) && <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters}><FilterX size={14} /> Clear</button>}
+            <div className="spacer" />
+            <span className="filter-count">{loading ? 'Generating…' : `${rows.length} record(s)`}</span>
           </div>
-        </div>
+        </SectionCard>
+      </div>
 
-        {summaryItems.length > 0 && (
-          <div className="report-summary">
-            {summaryItems.map((item) => (
-              <div className="rs" key={item.label}>
-                <b>{item.value}</b>
-                <span>{item.label}</span>
+      <section className="card flush reports-result">
+        <div className="reports-scroll">
+          <div className="print-report">
+            <div className="report-title">
+              <div className="row report-title-row">
+                <div><h2>{activeType?.label}</h2><p>{subtitle}</p></div>
+                <span className="badge badge-neutral no-dot">Generated {formatDate(new Date())}</span>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
 
-        {loading ? (
-          <LoadingState label="Generating report…" rows={7} columns={6} />
-        ) : !rows.length ? (
-          <EmptyState
-            icon={FileBarChart2}
-            title="No records for this report"
-            description="Try adjusting the date range, category or search filters. Reports reflect the records currently stored in MongoDB."
-          />
-        ) : (
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  {columns.map((column) => (
-                    <th key={column.key} className={column.align === 'right' ? 'num' : ''}>{column.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => (
-                  <tr key={row.id || `${row.reference || index}`}>
-                    {columns.map((column) => (
-                      <td key={column.key} className={column.align === 'right' ? 'num' : ''}>{renderCell(row, column)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+            {summaryItems.length > 0 && <div className="report-summary">{summaryItems.map((item) => <div className="rs" key={item.label}><b>{item.value}</b><span>{item.label}</span></div>)}</div>}
 
-        <div className="report-meta">
-          <span>
-            Generated by <strong>{user?.name}</strong> ({user?.role}) on {formatDateTime(data?.generatedAt || new Date())}
-          </span>
-          <span className="no-print">
-            <Undo2 size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> School Inventory Management System · Cavite State University
-          </span>
+            {loading ? (
+              <LoadingState label="Generating report…" rows={7} columns={6} />
+            ) : !rows.length ? (
+              <EmptyState icon={FileBarChart2} title="No records for this report" description="Try adjusting the date range, category or search. Reports reflect records currently stored in the inventory." />
+            ) : (
+              <div className="table-wrap report-table-wrap">
+                <table className="data report-table">
+                  <thead><tr>{columns.map((column) => <th key={column.key} className={column.align === 'right' ? 'num' : ''}>{column.label}</th>)}</tr></thead>
+                  <tbody>{rows.map((row, index) => <tr key={row.id || `${row.reference || index}`}>{columns.map((column) => <td key={column.key} className={column.align === 'right' ? 'num' : ''}>{renderCell(row, column)}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="report-meta">
+              <span>Generated by <strong>{user?.name}</strong> ({user?.role}) on {formatDateTime(data?.generatedAt || new Date())}</span>
+              <span>School Inventory Management System · Computer-lab resources</span>
+            </div>
+          </div>
         </div>
-      </SectionCard>
-    </>
+      </section>
+    </div>
   );
 }

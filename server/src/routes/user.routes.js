@@ -42,10 +42,12 @@ router.get(
     if (req.query.status === 'Active') filter.isActive = true;
     if (req.query.status === 'Inactive') filter.isActive = false;
 
-    const [users, total, roleCounts] = await Promise.all([
+    const [users, total, roleCounts, totalAccounts, activeAccounts] = await Promise.all([
       User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
       User.countDocuments(filter),
       User.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]),
+      User.countDocuments({}),
+      User.countDocuments({ isActive: true }),
     ]);
 
     const counts = { Administrator: 0, 'Inventory Staff': 0, Viewer: 0 };
@@ -59,6 +61,8 @@ router.get(
       page,
       pages: Math.max(1, Math.ceil(total / limit)),
       counts,
+      totalAccounts,
+      activeAccounts,
     });
   })
 );
@@ -81,9 +85,14 @@ router.post(
     ...passwordRules,
   ]),
   asyncHandler(async (req, res) => {
-    const { name, username, email = '', role, password } = req.body;
-    const existing = await User.findOne({ username });
-    if (existing) throw conflict('That username is already taken.');
+    const { name, username, role, password } = req.body;
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const existingUsername = await User.findOne({ username }).select('_id');
+    if (existingUsername) throw conflict('That username is already taken.');
+    if (email) {
+      const existingEmail = await User.findOne({ email }).select('_id');
+      if (existingEmail) throw conflict('That email address is already in use.');
+    }
 
     const user = await User.create({
       name,
@@ -125,26 +134,33 @@ router.patch(
       throw badRequest('You cannot remove your own administrator access.');
     }
 
-    if (req.body.role && req.body.role !== user.role) {
-      if (user.role === 'Administrator') {
-        const activeAdmins = await User.countDocuments({ role: 'Administrator', isActive: true });
-        if (activeAdmins <= 1) throw badRequest('At least one active administrator is required.');
-      }
+    const roleChanged = req.body.role !== undefined && req.body.role !== user.role;
+    if (roleChanged && user.isActive && user.role === 'Administrator') {
+      const activeAdmins = await User.countDocuments({ role: 'Administrator', isActive: true });
+      if (activeAdmins <= 1) throw badRequest('At least one active administrator is required.');
     }
 
     if (req.body.name !== undefined) user.name = req.body.name;
-    if (req.body.email !== undefined) user.email = req.body.email;
+    if (req.body.email !== undefined) {
+      const email = String(req.body.email || '').trim().toLowerCase();
+      if (email) {
+        const existingEmail = await User.findOne({ email, _id: { $ne: user._id } }).select('_id');
+        if (existingEmail) throw conflict('That email address is already in use.');
+      }
+      user.email = email;
+    }
     if (req.body.role !== undefined) user.role = req.body.role;
+    if (roleChanged) user.sessionVersion += 1;
     await user.save();
 
     await logActivity({
       req,
       actor: req.user,
-      action: 'Updated user account',
+      action: roleChanged ? 'Changed account role' : 'Updated user account',
       entityType: 'User',
       entityId: user._id.toString(),
       entityLabel: user.username,
-      details: `Name: ${user.name}; Role: ${user.role}`,
+      details: roleChanged ? `Role changed to ${user.role}.` : `Name or email updated for ${user.name}.`,
     });
 
     res.json({ message: 'User account updated.', user: toUserDTO(user) });
@@ -166,6 +182,7 @@ router.post(
     }
 
     user.isActive = !user.isActive;
+    user.sessionVersion += 1;
     await user.save();
 
     await logActivity({
@@ -194,6 +211,7 @@ router.post(
     if (!user) throw notFound('User account not found.');
     user.passwordHash = await User.hashPassword(req.body.password);
     user.passwordChangedAt = new Date();
+    user.sessionVersion += 1;
     await user.save();
 
     await logActivity({

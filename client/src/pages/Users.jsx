@@ -36,7 +36,7 @@ const MATRIX = [
   { permission: 'Archive inventory items', admin: true, staff: false, viewer: false },
 ];
 
-function UserModal({ open, onClose, user, onSaved }) {
+function UserModal({ open, onClose, user, onSaved, isSelf = false }) {
   const [form, setForm] = useState({ name: '', username: '', email: '', role: 'Viewer', password: '', confirm: '' });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState('');
@@ -127,10 +127,10 @@ function UserModal({ open, onClose, user, onSaved }) {
           </div>
           <div className="field">
             <label htmlFor="user-role">Role <span className="req">*</span></label>
-            <select id="user-role" className="select" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>
+            <select id="user-role" className="select" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} disabled={isSelf}>
               {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
             </select>
-            <span className="field-hint">Permissions are enforced by the API.</span>
+            <span className="field-hint">{isSelf ? 'You cannot change your own administrator role.' : 'Permissions are enforced by the API.'}</span>
           </div>
           <div className="field span-2">
             <label htmlFor="user-email">Email address</label>
@@ -141,12 +141,12 @@ function UserModal({ open, onClose, user, onSaved }) {
             <>
               <div className="field">
                 <label htmlFor="user-password">Temporary password <span className="req">*</span></label>
-                <input id="user-password" type="text" className={`input ${errors.password ? 'invalid' : ''}`} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} maxLength={72} />
+                <input id="user-password" type="password" className={`input ${errors.password ? 'invalid' : ''}`} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} maxLength={72} />
                 {errors.password ? <span className="field-error">{errors.password}</span> : <span className="field-hint">At least 8 characters with a letter and a number.</span>}
               </div>
               <div className="field">
                 <label htmlFor="user-confirm">Confirm password <span className="req">*</span></label>
-                <input id="user-confirm" type="text" className={`input ${errors.confirm ? 'invalid' : ''}`} value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} maxLength={72} />
+                <input id="user-confirm" type="password" className={`input ${errors.confirm ? 'invalid' : ''}`} value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} maxLength={72} />
                 {errors.confirm && <span className="field-error">{errors.confirm}</span>}
               </div>
             </>
@@ -207,12 +207,12 @@ function ResetPasswordModal({ open, onClose, user, onSaved }) {
       <form id="reset-form" onSubmit={submit} noValidate>
         <div className="field">
           <label htmlFor="reset-password">New password</label>
-          <input id="reset-password" className="input" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} maxLength={72} />
+          <input id="reset-password" type="password" className="input" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} maxLength={72} />
           <span className="field-hint">At least 8 characters with a letter and a number.</span>
         </div>
         <div className="field" style={{ marginTop: 12 }}>
           <label htmlFor="reset-confirm">Confirm password</label>
-          <input id="reset-confirm" className="input" value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} maxLength={72} />
+          <input id="reset-confirm" type="password" className="input" autoComplete="new-password" value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} maxLength={72} />
         </div>
         {error && <div className="login-error" style={{ marginTop: 12 }}>{error}</div>}
       </form>
@@ -281,8 +281,8 @@ export default function Users() {
         </button>
       </PageHeader>
 
-      <div className="grid grid-stats" style={{ marginBottom: 14 }}>
-        <StatCard label="Total Accounts" value={total} icon={UsersIcon} tone="dark" sub={`${data?.users?.filter((entry) => entry.isActive).length || 0} active on this page`} />
+      <div className="grid grid-stats account-stats" style={{ marginBottom: 14 }}>
+        <StatCard label="Total Accounts" value={data?.totalAccounts || 0} icon={UsersIcon} tone="dark" sub={`${data?.activeAccounts || 0} active`} />
         <StatCard label="Administrators" value={counts.Administrator || 0} icon={ShieldCheck} tone="accent" sub="Full system access" />
         <StatCard label="Inventory Staff" value={counts['Inventory Staff'] || 0} icon={UserRound} sub="Stock and borrowing" />
         <StatCard label="Viewers" value={counts.Viewer || 0} icon={UserCheck} sub="Read-only access" />
@@ -400,7 +400,7 @@ export default function Users() {
         </div>
       </SectionCard>
 
-      <UserModal open={modalOpen} onClose={() => setModalOpen(false)} user={editing} onSaved={(message) => { toast.success(message); refresh(); }} />
+      <UserModal open={modalOpen} onClose={() => setModalOpen(false)} user={editing} isSelf={editing?.id === currentUser?.id} onSaved={(message) => { toast.success(message); refresh(); }} />
       <ResetPasswordModal open={Boolean(resetTarget)} onClose={() => setResetTarget(null)} user={resetTarget} onSaved={(message) => { toast.success(message); refresh(); }} />
       <ConfirmDialog
         open={Boolean(toggleTarget)}

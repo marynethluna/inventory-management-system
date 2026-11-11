@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { setUnauthorizedHandler, storeToken } from '../api/client';
+import api, { setUnauthorizedHandler } from '../api/client';
 import { can } from '../utils/permissions';
 
 const AuthContext = createContext(null);
@@ -14,8 +14,10 @@ export function AuthProvider({ children }) {
     try {
       const data = await api.get('/auth/me');
       setUser(data.user);
+      return data.user;
     } catch {
       setUser(null);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -27,14 +29,20 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      storeToken(null);
       setUser(null);
+      setLoading(false);
     });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
-  const login = useCallback(async (username, password) => {
-    const data = await api.post('/auth/login', { username, password });
-    storeToken(data.token);
+  const login = useCallback(async (identifier, password) => {
+    const data = await api.post('/auth/login', { identifier, password });
+    setUser(data.user);
+    return data.user;
+  }, []);
+
+  const signup = useCallback(async (name, email, password, confirmPassword) => {
+    const data = await api.post('/auth/signup', { name, email, password, confirmPassword });
     setUser(data.user);
     return data.user;
   }, []);
@@ -43,9 +51,9 @@ export function AuthProvider({ children }) {
     try {
       await api.post('/auth/logout');
     } catch {
-      /* ignore network errors on logout */
+      // Clear local auth state even if the network is unavailable. The server
+      // also revokes the session version whenever it receives the logout call.
     }
-    storeToken(null);
     setUser(null);
     navigate('/login', { replace: true });
   }, [navigate]);
@@ -53,8 +61,8 @@ export function AuthProvider({ children }) {
   const hasPermission = useCallback((permission) => can(user?.role, permission), [user?.role]);
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, refresh, hasPermission, isAdmin: user?.role === 'Administrator' }),
-    [user, loading, login, logout, refresh, hasPermission]
+    () => ({ user, loading, login, signup, logout, refresh, hasPermission, isAdmin: user?.role === 'Administrator' }),
+    [user, loading, login, signup, logout, refresh, hasPermission]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

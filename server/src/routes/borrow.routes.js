@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { body, param, query } from 'express-validator';
 import { Item } from '../models/Item.js';
 import { BorrowRecord } from '../models/BorrowRecord.js';
@@ -112,65 +113,63 @@ router.post(
   ]),
   asyncHandler(async (req, res) => {
     const { borrowerName, borrowerIdNumber, itemId, quantity, remarks = '' } = req.body;
+    const quantityNumber = Number(quantity);
     const dateBorrowed = req.body.dateBorrowed && isValidDate(req.body.dateBorrowed) ? new Date(req.body.dateBorrowed) : new Date();
     const expectedReturnDate = new Date(req.body.expectedReturnDate);
-
     if (expectedReturnDate < dateBorrowed) {
       throw badRequest('The expected return date cannot be earlier than the borrowing date.');
     }
 
-    const item = await Item.findById(itemId);
-    if (!item) throw notFound('Inventory item not found.');
-    if (!item.isActive) throw badRequest('This item is archived and cannot be borrowed.');
-
-    const updated = await Item.findOneAndUpdate(
-      { _id: item._id, isActive: true, quantity: { $gte: quantity } },
-      { $inc: { quantity: -quantity }, $set: { updatedBy: req.user._id } },
-      { new: true, runValidators: true }
-    );
-
-    if (!updated) {
-      throw conflict(
-        `Cannot borrow ${quantity} ${item.unit} of ${item.name}. Only ${item.quantity} available.`
-      );
-    }
-
-    let record = null;
+    let record;
+    let itemSnapshot;
+    let newBalance;
+    const session = await mongoose.startSession();
     try {
-      const reference = await nextSequence('borrow', 'BRW-', 4);
-      record = await BorrowRecord.create({
-        reference,
-        borrowerName,
-        borrowerIdNumber,
-        item: item._id,
-        quantity,
-        dateBorrowed,
-        expectedReturnDate,
-        status: 'Borrowed',
-        remarks,
-        recordedBy: req.user._id,
-      });
+      await session.withTransaction(async () => {
+        const item = await Item.findById(itemId).session(session);
+        if (!item) throw notFound('Inventory item not found.');
+        if (!item.isActive) throw badRequest('This item is archived and cannot be borrowed.');
+        itemSnapshot = { id: item._id.toString(), name: item.name, unit: item.unit };
 
-      const txnReference = await nextSequence('transaction', 'TXN-', 5);
-      await StockTransaction.create({
-        reference: txnReference,
-        type: 'Borrowed',
-        item: item._id,
-        quantity,
-        balanceAfter: updated.quantity,
-        date: dateBorrowed,
-        reason: `Borrowed by ${borrowerName}`,
-        remarks: `Borrow reference ${reference}. Expected return ${expectedReturnDate.toISOString().slice(0, 10)}.`,
-        recordedBy: req.user._id,
+        const updated = await Item.findOneAndUpdate(
+          { _id: item._id, isActive: true, quantity: { $gte: quantityNumber } },
+          { $inc: { quantity: -quantityNumber }, $set: { updatedBy: req.user._id } },
+          { new: true, runValidators: true, session }
+        );
+        if (!updated) {
+          throw conflict(`Cannot borrow ${quantityNumber} ${item.unit} of ${item.name}. Only ${item.quantity} available.`);
+        }
+        newBalance = updated.quantity;
+
+        const reference = await nextSequence('borrow', 'BRW-', 4, session);
+        [record] = await BorrowRecord.create([{
+          reference,
+          borrowerName,
+          borrowerIdNumber,
+          item: item._id,
+          quantity: quantityNumber,
+          dateBorrowed,
+          expectedReturnDate,
+          status: 'Borrowed',
+          remarks,
+          recordedBy: req.user._id,
+        }], { session });
+
+        const txnReference = await nextSequence('transaction', 'TXN-', 5, session);
+        await StockTransaction.create([{
+          reference: txnReference,
+          type: 'Borrowed',
+          item: item._id,
+          quantity: quantityNumber,
+          balanceAfter: updated.quantity,
+          date: dateBorrowed,
+          reason: `Borrowed by ${borrowerName}`,
+          remarks: `Borrow reference ${reference}. Expected return ${expectedReturnDate.toISOString().slice(0, 10)}.`,
+          recordedBy: req.user._id,
+        }], { session });
       });
-    } catch (error) {
-      try {
-        await Item.updateOne({ _id: item._id }, { $inc: { quantity } });
-        if (record) await record.deleteOne();
-      } catch (revertError) {
-        console.error('[borrow compensation failed]', revertError);
-      }
-      throw error;
+    } finally {
+      await session.endSession();
     }
 
     await logActivity({
@@ -179,12 +178,12 @@ router.post(
       action: 'Recorded borrowed item',
       entityType: 'Borrow',
       entityId: record._id.toString(),
-      entityLabel: `${record.reference} · ${item.name}`,
-      details: `${borrowerName} (${borrowerIdNumber}) borrowed ${quantity} ${item.unit}. Expected return ${expectedReturnDate.toISOString().slice(0, 10)}.`,
+      entityLabel: `${record.reference} · ${itemSnapshot.name}`,
+      details: `${borrowerName} (${borrowerIdNumber}) borrowed ${quantityNumber} ${itemSnapshot.unit}. Expected return ${expectedReturnDate.toISOString().slice(0, 10)}.`,
     });
 
     res.status(201).json({
-      message: `Borrowing recorded for ${borrowerName}. ${item.name} now has ${updated.quantity} ${item.unit} available.`,
+      message: `Borrowing recorded for ${borrowerName}. ${itemSnapshot.name} now has ${newBalance} ${itemSnapshot.unit} available.`,
       borrow: toBorrowDTO(record),
     });
   })
@@ -195,50 +194,54 @@ router.post(
   requirePermission('borrows:update'),
   validate([param('id').isMongoId()]),
   asyncHandler(async (req, res) => {
-    const record = await BorrowRecord.findById(req.params.id);
-    if (!record) throw notFound('Borrowing record not found.');
-    if (record.status === 'Returned') throw conflict('This item has already been returned.');
-
-    const item = await Item.findById(record.item);
-    if (!item) throw notFound('The borrowed item no longer exists in the inventory.');
-
-    const updated = await Item.findOneAndUpdate(
-      { _id: item._id },
-      { $inc: { quantity: record.quantity }, $set: { updatedBy: req.user._id } },
-      { new: true, runValidators: true }
-    );
-
     const now = new Date();
-    record.status = 'Returned';
-    record.actualReturnDate = now;
-    record.returnedBy = req.user._id;
-    await record.save();
-
-    let transaction = null;
+    let record;
+    let transaction;
+    let itemSnapshot;
+    let updatedQuantity;
+    const session = await mongoose.startSession();
     try {
-      const reference = await nextSequence('transaction', 'TXN-', 5);
-      transaction = await StockTransaction.create({
-        reference,
-        type: 'Returned',
-        item: item._id,
-        quantity: record.quantity,
-        balanceAfter: updated.quantity,
-        date: now,
-        reason: `Returned by ${record.borrowerName}`,
-        remarks: `Borrow reference ${record.reference}.`,
-        recordedBy: req.user._id,
+      await session.withTransaction(async () => {
+        const original = await BorrowRecord.findById(req.params.id).session(session);
+        if (!original) throw notFound('Borrowing record not found.');
+        if (original.status !== 'Borrowed') {
+          throw conflict('This item has already been returned or is being returned by another staff member.');
+        }
+
+        record = await BorrowRecord.findOneAndUpdate(
+          { _id: original._id, status: 'Borrowed' },
+          { $set: { status: 'Returned', actualReturnDate: now, returnedBy: req.user._id } },
+          { new: true, runValidators: true, session }
+        );
+        if (!record) throw conflict('This item has already been returned or is being returned by another staff member.');
+
+        const item = await Item.findById(record.item).session(session);
+        if (!item) throw notFound('The borrowed item no longer exists in the inventory.');
+        itemSnapshot = { id: item._id.toString(), name: item.name, unit: item.unit };
+
+        const updated = await Item.findOneAndUpdate(
+          { _id: item._id },
+          { $inc: { quantity: record.quantity }, $set: { updatedBy: req.user._id } },
+          { new: true, runValidators: true, session }
+        );
+        if (!updated) throw notFound('The borrowed item no longer exists in the inventory.');
+        updatedQuantity = updated.quantity;
+
+        const reference = await nextSequence('transaction', 'TXN-', 5, session);
+        [transaction] = await StockTransaction.create([{
+          reference,
+          type: 'Returned',
+          item: item._id,
+          quantity: record.quantity,
+          balanceAfter: updated.quantity,
+          date: now,
+          reason: `Returned by ${record.borrowerName}`,
+          remarks: `Borrow reference ${record.reference}.`,
+          recordedBy: req.user._id,
+        }], { session });
       });
-    } catch (error) {
-      try {
-        await Item.updateOne({ _id: item._id }, { $inc: { quantity: -record.quantity } });
-        record.status = 'Borrowed';
-        record.actualReturnDate = null;
-        record.returnedBy = null;
-        await record.save();
-      } catch (revertError) {
-        console.error('[return compensation failed]', revertError);
-      }
-      throw error;
+    } finally {
+      await session.endSession();
     }
 
     await logActivity({
@@ -247,14 +250,14 @@ router.post(
       action: 'Recorded returned item',
       entityType: 'Borrow',
       entityId: record._id.toString(),
-      entityLabel: `${record.reference} · ${item.name}`,
-      details: `${record.borrowerName} returned ${record.quantity} ${item.unit}. New balance: ${updated.quantity}.`,
+      entityLabel: `${record.reference} · ${itemSnapshot.name}`,
+      details: `${record.borrowerName} returned ${record.quantity} ${itemSnapshot.unit}. New balance: ${updatedQuantity}.`,
     });
 
     res.json({
-      message: `Return recorded. ${item.name} now has ${updated.quantity} ${item.unit} available.`,
+      message: `Return recorded. ${itemSnapshot.name} now has ${updatedQuantity} ${itemSnapshot.unit} available.`,
       borrow: toBorrowDTO(record),
-      transaction: transaction ? toTransactionDTO(transaction) : null,
+      transaction: toTransactionDTO(transaction),
     });
   })
 );

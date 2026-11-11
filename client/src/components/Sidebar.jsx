@@ -5,7 +5,6 @@ import {
   FileBarChart2,
   History,
   LayoutDashboard,
-  LogOut,
   Settings,
   Tags,
   Users,
@@ -27,46 +26,45 @@ const ICONS = {
   settings: Settings,
 };
 
-export function Sidebar({ open, pinned, isMobile, onClose, onLogout, alertCount = 0 }) {
+export function Sidebar({ open, isMobile, onClose, onMouseEnter, onMouseLeave, alertCount = 0 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
-
+  const collapsed = !open && !isMobile;
   const items = NAV_ITEMS.filter((item) => can(user?.role, item.permission));
   const groups = [...new Set(items.map((item) => item.group))];
 
   const go = (path) => {
     navigate(path);
-    onClose();
+    if (isMobile || !open) onClose();
   };
 
   return (
     <>
       {isMobile && open && <div className="sidebar-overlay" onClick={onClose} aria-hidden="true" />}
       <aside
-        className={`sidebar ${open ? 'is-open' : ''} ${pinned && !isMobile ? 'is-pinned' : ''}`.trim()}
+        className={`sidebar ${open ? 'is-open' : 'is-collapsed'} ${isMobile ? 'is-mobile' : ''}`.trim()}
         aria-label="Main navigation"
-        onMouseLeave={() => {
-          if (!pinned) onClose();
-        }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
         <div className="sidebar-brand">
-          <div className="brand-mark">IM</div>
-          <div className="sidebar-brand-text">
+          <div className="brand-mark" aria-label="Inventory Management">IM</div>
+          <div className="sidebar-brand-text" aria-hidden={collapsed}>
             <b>School Inventory</b>
             <small>Management System</small>
           </div>
           {isMobile && (
-            <button type="button" className="sidebar-logout" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close menu">
-              <X size={14} />
+            <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close navigation">
+              <X size={16} />
             </button>
           )}
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Application pages">
           {groups.map((group) => (
-            <div key={group}>
-              <div className="nav-group-label">{group}</div>
+            <div className="nav-group" key={group}>
+              <div className="nav-group-label" aria-hidden={collapsed}>{group}</div>
               {items
                 .filter((item) => item.group === group)
                 .map((item) => {
@@ -79,10 +77,11 @@ export function Sidebar({ open, pinned, isMobile, onClose, onLogout, alertCount 
                       className={`nav-item ${active ? 'active' : ''}`}
                       onClick={() => go(item.to)}
                       aria-current={active ? 'page' : undefined}
+                      title={collapsed ? item.label : undefined}
                     >
-                      <Icon size={17} strokeWidth={1.9} />
-                      <span>{item.label}</span>
-                      {item.icon === 'inventory' && alertCount > 0 && <span className="nav-badge">{alertCount}</span>}
+                      <Icon size={18} strokeWidth={1.9} aria-hidden="true" />
+                      <span className="nav-item-label" aria-hidden={collapsed}>{item.label}</span>
+                      {item.icon === 'inventory' && alertCount > 0 && <span className="nav-badge">{alertCount > 9 ? '9+' : alertCount}</span>}
                     </button>
                   );
                 })}
@@ -90,17 +89,9 @@ export function Sidebar({ open, pinned, isMobile, onClose, onLogout, alertCount 
           ))}
         </nav>
 
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="avatar">{user?.initials || 'IM'}</div>
-            <div className="sidebar-user-info">
-              <b>{user?.name}</b>
-              <small>{user?.role}</small>
-            </div>
-            <button type="button" className="sidebar-logout" onClick={onLogout} title="Log out" aria-label="Log out">
-              <LogOut size={13} />
-            </button>
-          </div>
+        <div className="sidebar-collapsed-hint" aria-hidden={collapsed ? 'true' : undefined}>
+          <span className="sidebar-hint-icon"><Boxes size={15} /></span>
+          <span>School resources, accounted for.</span>
         </div>
       </aside>
     </>

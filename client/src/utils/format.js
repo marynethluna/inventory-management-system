@@ -113,14 +113,18 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function csvField(value) {
+  let text = String(value ?? '');
+  // Prevent spreadsheet software from evaluating untrusted report values as formulas.
+  if (/^[\u0000-\u0020]*[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 export function exportCSV(filename, columns, rows) {
-  const header = columns.map((column) => `"${column.label.replace(/"/g, '""')}"`).join(',');
+  const header = columns.map((column) => csvField(column.label)).join(',');
   const body = rows.map((row) =>
     columns
-      .map((column) => {
-        const value = cellValue(row[column.key], column.key);
-        return `"${String(value).replace(/"/g, '""')}"`;
-      })
+      .map((column) => csvField(cellValue(row[column.key], column.key)))
       .join(',')
   );
   const csv = [header, ...body].join('\r\n');

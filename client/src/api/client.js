@@ -1,22 +1,4 @@
 const BASE = import.meta.env.VITE_API_URL || '/api';
-const TOKEN_KEY = 'ims_access_token';
-
-export function getStoredToken() {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function storeToken(token) {
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable */
-  }
-}
 
 let unauthorizedHandler = null;
 export function setUnauthorizedHandler(handler) {
@@ -33,16 +15,14 @@ async function request(path, { method = 'GET', body, params, signal } = {}) {
     });
   }
 
-  const token = getStoredToken();
   const headers = {};
-  if (body) headers['Content-Type'] = 'application/json';
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
 
   const response = await fetch(url.toString(), {
     method,
     credentials: 'include',
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   });
 
@@ -57,10 +37,7 @@ async function request(path, { method = 'GET', body, params, signal } = {}) {
     const error = new Error(data?.message || `Request failed with status ${response.status}.`);
     error.status = response.status;
     error.details = data?.details;
-    if (response.status === 401) {
-      storeToken(null);
-      if (unauthorizedHandler) unauthorizedHandler();
-    }
+    if (response.status === 401 && unauthorizedHandler) unauthorizedHandler();
     throw error;
   }
 

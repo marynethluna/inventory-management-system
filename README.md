@@ -1,311 +1,129 @@
-# School Inventory Management System with Access Control
+# Inventory Management System with Access Control
 
-A complete **MERN stack** inventory management application for Cavite State University — Don Severino de las Alas Campus, College of Engineering and Information Technology.
+A React, Express and MongoDB inventory application for school resources and computer-lab equipment. It includes role-based access, stock transactions, borrowing and returns, low-stock alerts, reports, theme preferences, account management and audit logs.
 
-The system centralizes school supplies, computer equipment, laboratory materials and other institutional resources, with **role-based access control**, **stock transactions**, **borrowing and return tracking**, **low-stock alerts**, **activity logs**, and **printable/exportable reports**.
+The existing client/server folder layout and application routes are retained. The interface uses a warm orange-and-charcoal palette, responsive layout, collapsible navigation, accessible transaction filters, and report-specific print styling.
 
-The interface is an evolution of the provided `School-Inventory-Management-System-1.html` design: the same warm orange (`#F28C28`) and charcoal (`#1E1E1E`) identity, sidebar navigation, cards, tables and typography — refined with cleaner spacing, consistent components, subtle shadows, responsive layouts and a collapsible hover-reveal sidebar.
+## Roles
 
----
+| Role | Access |
+| --- | --- |
+| **Administrator** | Manage accounts and roles, categories, inventory, stock adjustments, reports, settings and activity logs. |
+| **Inventory Staff** | Create and edit inventory, record stock movements and borrowing/returns, review transaction history and receive low-stock alerts. |
+| **Viewer** | Read-only dashboard, inventory, categories and reports. Write requests are rejected by the API, not just hidden in the interface. |
 
-## Demo accounts
-
-| Role | Username | Password | Access |
-| --- | --- | --- | --- |
-| Administrator | `admin` | `Admin@123` | Full system access |
-| Inventory Staff | `staff` | `Staff@123` | Inventory, stock, borrowing |
-| Viewer | `viewer` | `Viewer@123` | Read-only dashboard, inventory, reports |
-
-> The login screen also has one-click buttons that fill these credentials.
-
----
+Self-signup always creates a Viewer account. It never accepts a role from the client. There are no seeded demo accounts or frontend demo credentials.
 
 ## Features
 
-### Dashboard
-- Total inventory items, total available stocks, low-stock items, out-of-stock items, total borrowed items and overdue returns.
-- 7-day stock movement bar chart and category distribution donut chart (Reactive Charts / Recharts).
-- Low-stock alert table, recent transactions, recent activity timeline and active borrowings.
-- All figures are computed live from MongoDB.
+- **Dashboard:** key stock statistics, low-stock alerts, recent transactions, movement/category charts; select among five chart types, remembered for the browser session.
+- **Inventory:** search, filters, sorting, pagination, categories, archive/restore and item details. Stock quantity is not editable on the item form; an opening balance creates a Stock In record.
+- **Transactions:** Stock In, Stock Out and Administrator-only Adjustment flows; validated quantities, summary filters, search and history. Stock and its ledger record commit together in a MongoDB transaction.
+- **Borrowing:** borrowing records deduct stock and create a transaction; returns restore stock and record a matching ledger entry, all atomically.
+- **Reports:** report types and filters, CSV/PDF export and print-only report layout. Reports are readable by all roles.
+- **Accounts:** Administrator-only account and role management, with self/last-active-administrator safeguards and session invalidation after security changes.
+- **Settings:** profile/password, light/dark theme, and Administrator inventory defaults, configured units and category management.
+- **Audit and alerts:** important account, authentication, inventory, category, stock and borrowing actions are logged. Low-stock alerts are available to all roles; overdue-borrow details are restricted to operational roles.
+- **Authentication:** password hashing, secure HTTP-only cookies, Viewer-only signup, hashed one-time expiring reset tokens, and development reset links surfaced in the UI without SMTP.
 
-### Inventory
-- Add, view, edit, archive and restore items.
-- Item code (`INV-0001`), name, category, description, quantity, unit, minimum stock level, location, condition, date added and last updated.
-- Search, category/condition/status filters, sorting and pagination.
-- Status badges: **In Stock**, **Low Stock**, **Out of Stock**.
-- Quantity changes are only allowed through recorded stock transactions (data integrity).
-- Duplicate item names within the same category and invalid quantities are rejected.
+## Requirements
 
-### Stock transactions
-- Separate **Stock In**, **Stock Out** and administrator-only **Adjustment** flows.
-- Supplier/source, reason, remarks, transaction date and responsible user.
-- Atomic stock updates with a guard against negative quantities.
-- Complete transaction history with running balance and reference numbers (`TXN-00001`).
-
-### Borrowing & returns
-- Borrower name, ID/reference, item, quantity, date borrowed, expected return and remarks.
-- Statuses: **Borrowed**, **Returned**, **Overdue** (computed automatically).
-- Stock is deducted when borrowed and restored when returned.
-- Borrowing more than the available quantity is prevented.
-
-### Categories
-- Create, edit and view categories with item counts and total quantities.
-- Deletion is blocked when items still reference the category.
-
-### User management (Administrator only)
-- Create accounts, edit profiles, assign roles, activate/deactivate accounts and reset passwords.
-- Search and filter by role/status.
-- Guardrails: you cannot deactivate yourself, remove your own admin access, or leave the system without an active administrator.
-- Role permission matrix.
-
-### Activity logs (Administrator only)
-- Audit trail of logins, stock movements, item changes, user changes, category changes and reports.
-- Filter by keyword and date range; export to CSV.
-
-### Reports
-- Complete inventory, available stock, low-stock, out-of-stock, stock-in, stock-out, borrowed/returned and full transaction history.
-- Filter by date range, category and keyword.
-- **Print**, **export CSV** and **export PDF** (jsPDF + AutoTable).
-
-### Notifications & settings
-- Topbar alert bell with low-stock, out-of-stock and overdue-return notifications.
-- Profile editing, password change, light/dark theme and security information.
-
----
-
-## Tech stack
-
-| Layer | Technology |
-| --- | --- |
-| Database | MongoDB (Mongoose ODM) |
-| Backend | Node.js, Express.js |
-| Frontend | React 18, Vite, React Router |
-| Auth | JWT (HTTP-only cookie + Bearer fallback), bcrypt password hashing |
-| Validation | express-validator + schema validation + input sanitization |
-| UI | Custom CSS design system, Lucide icons, Recharts, jsPDF |
-
----
+- Node.js 20 or newer
+- npm 10 or newer
+- MongoDB for persistent deployments. The built-in development database uses an in-process single-node replica set.
 
 ## Quick start
 
-### Prerequisites
-- Node.js 20 or newer
-- npm 10 or newer
-- MongoDB (optional — see below)
+From the project root:
 
-### 1. Install dependencies
-
-```bash
-cd inventory-system
+```sh
 npm run setup
+cp server/.env.example server/.env
 ```
 
-### 2. Configure the environment
-
-```bash
-cd server
-cp .env.example .env
-```
-
-Edit `server/.env`:
+Edit `server/.env` before starting. Generate a private JWT secret, and configure a first Administrator before the first launch:
 
 ```env
 NODE_ENV=development
 PORT=4000
-JWT_SECRET=replace-with-a-long-random-secret
+JWT_SECRET=<private random value; generate with openssl rand -base64 48>
 JWT_EXPIRES_IN=7d
 COOKIE_SECURE=false
-# Optional: connect to a real MongoDB deployment
-# MONGODB_URI=mongodb://127.0.0.1:27017/school_inventory
+CLIENT_ORIGIN=http://localhost:5173
+CLIENT_URL=http://localhost:5173
+INITIAL_ADMIN_NAME=Inventory Administrator
+INITIAL_ADMIN_EMAIL=admin@your-school.example
+INITIAL_ADMIN_PASSWORD=<private password of at least 8 characters>
 ```
 
-### 3. Build and start
+Replace the example administrator values with private, unique values and do not commit `.env`. The bootstrap account is created only when the user collection is empty. No preset username or password exists. If no bootstrap account is configured, users can self-register as Viewers, but only an Administrator can manage privileged functions.
 
-```bash
-cd inventory-system
-npm run build     # builds the React client into client/dist
-npm start         # Express serves the API and the built client on http://localhost:4000
-```
+Start the API and client in separate terminals:
 
-Open **http://localhost:4000** and sign in with one of the demo accounts.
-
-### Development mode
-
-```bash
-# Terminal 1 — API on http://localhost:4000
+```sh
 npm run dev:server
-
-# Terminal 2 — Vite dev server on http://localhost:5173 (proxies /api to 4000)
 npm run dev:client
 ```
 
-### Seeding
+Open `http://localhost:5173`. The Vite server proxies `/api` to port 4000. To serve the production build from Express instead:
 
-The database is seeded automatically on first start (5 users, 6 categories, 16 items, 34 stock transactions and 6 borrow records). To reseed manually:
-
-```bash
-cd server
-npm run seed
-# FORCE=1 npm run seed   # clears and recreates the demo data
+```sh
+npm run build
+npm start
 ```
 
----
+The API is available at `http://localhost:4000/api`. `/api/health` is a minimal public liveness endpoint. Other application data routes require authentication and role permissions.
 
-## Database
+## Password-reset email
 
-MongoDB collections (Mongoose models in `server/src/models`):
+When `SMTP_HOST` is not configured in development, password-reset requests keep a generic confirmation message and show a one-time reset link in the UI for a registered account (the link is also printed to the server console). No SMTP service is needed for local preview testing. For email delivery, set `SMTP_HOST`, `SMTP_PORT`, optional `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` and `MAIL_FROM`. Set `CLIENT_URL` to the client’s exact public origin when deployed separately. Use HTTPS and `COOKIE_SECURE=true` in production.
 
-| Collection | Purpose |
-| --- | --- |
-| `users` | Accounts, bcrypt password hashes, roles, active status, last login |
-| `categories` | Product categories with descriptions |
-| `items` | Inventory items, quantities, minimum levels, location, condition, archive flag |
-| `stocktransactions` | Stock In / Stock Out / Borrowed / Returned / Adjustment records with balance after each movement |
-| `borrowrecords` | Borrowing transactions, expected/actual return dates and status |
-| `activitylogs` | Audit trail of important actions |
-| `counters` | Atomic reference generators (`INV-`, `TXN-`, `BRW-`) |
+## Database and atomic stock changes
 
-Relationships: items → categories; transactions → items + users; borrow records → items + users; logs → users.
+If `MONGODB_URI` is unset, the server launches an in-process MongoDB replica set for local development; its data is temporary and disappears when the process stops. For persistent use, set `MONGODB_URI` to a MongoDB **replica-set or sharded-cluster** URI. Stock changes, their transaction ledger entries, and borrowing state use multi-document transactions and fail closed if transactions are unavailable; standalone MongoDB deployments are not supported for these operations.
 
-### Persistence note
+Seed initialization creates realistic computer-lab categories, items and recorded stock history without creating user accounts (except for the optional bootstrap Administrator). To reseed inventory:
 
-If `MONGODB_URI` is **not** set, the server starts an in-process MongoDB instance (`mongodb-memory-server`) so the project runs out of the box. Records are stored in MongoDB for the lifetime of the server process. For production or permanent storage, set `MONGODB_URI` to a real MongoDB deployment — no code changes are required.
+```sh
+npm run seed
+# To clear and recreate inventory data while preserving accounts:
+cd server && FORCE=1 npm run seed
+```
 
----
+## API outline
 
-## API reference
+All endpoints are under `/api`. Authentication uses the `ims_token` HTTP-only cookie; bearer-token and browser-storage fallbacks are not accepted.
 
-All endpoints are under `/api`. Authentication is required unless stated otherwise.
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| POST | `/auth/login`, `/auth/signup`, `/auth/forgot-password`, `/auth/reset-password` | Public, rate-limited where appropriate |
+| POST | `/auth/logout`, `/auth/change-password`; PATCH `/auth/profile` | Authenticated |
+| GET | `/auth/me` | Authenticated |
+| GET/POST/PATCH/DELETE | `/items` and item routes | Inventory permissions; writes limited to Administrator/Inventory Staff, archive/restore Administrator-only |
+| GET/POST | `/transactions` | Administrator/Inventory Staff; stock adjustment Administrator-only |
+| GET/POST | `/borrows`; POST `/borrows/:id/return` | Administrator/Inventory Staff |
+| GET/POST/PATCH/DELETE | `/categories` | Read all roles; management Administrator-only |
+| GET | `/reports` | All authenticated roles |
+| GET/POST/PATCH | `/users` and user routes | Administrator-only |
+| GET | `/activity-logs` | Administrator-only |
+| GET/PATCH | `/settings` | Read all roles; inventory defaults/units Administrator-only |
+| GET | `/dashboard`, `/dashboard/notifications` | All authenticated roles; overdue details are role-filtered |
+| GET | `/health` | Public minimal liveness response |
 
-| Method | Endpoint | Permission | Description |
-| --- | --- | --- | --- |
-| POST | `/auth/login` | Public | Sign in, returns JWT + user |
-| POST | `/auth/logout` | Authenticated | Clear session |
-| GET | `/auth/me` | Authenticated | Current user |
-| PATCH | `/auth/profile` | Authenticated | Update own name/email |
-| POST | `/auth/change-password` | Authenticated | Change own password |
-| GET | `/dashboard` | dashboard:read | Dashboard statistics |
-| GET | `/dashboard/notifications` | dashboard:read | Low-stock/out-of-stock/overdue alerts |
-| GET | `/items` | inventory:read | Search, filter, sort, paginate |
-| GET | `/items/:id` | inventory:read | Item details |
-| POST | `/items` | inventory:create | Add item |
-| PATCH | `/items/:id` | inventory:update | Edit item |
-| DELETE | `/items/:id` | inventory:archive | Archive item |
-| PATCH | `/items/:id/restore` | inventory:archive | Restore item |
-| GET | `/transactions` | transactions:read | Transaction history |
-| POST | `/transactions` | transactions:create | Stock In / Stock Out / Adjustment |
-| GET | `/borrows` | borrows:read | Borrowing history |
-| POST | `/borrows` | borrows:create | Record borrowing |
-| POST | `/borrows/:id/return` | borrows:update | Record return |
-| GET | `/categories` | categories:read | Categories with statistics |
-| POST | `/categories` | categories:manage | Create category |
-| PATCH | `/categories/:id` | categories:manage | Edit category |
-| DELETE | `/categories/:id` | categories:manage | Delete empty category |
-| GET | `/reports` | reports:read | Filtered report data |
-| GET | `/users` | users:read | List users |
-| POST | `/users` | users:manage | Create user |
-| PATCH | `/users/:id` | users:manage | Edit user/role |
-| POST | `/users/:id/toggle` | users:manage | Activate/deactivate |
-| POST | `/users/:id/reset-password` | users:manage | Reset password |
-| GET | `/activity-logs` | logs:read | Audit trail |
-| GET | `/health` | Public | Service health |
+The server permission matrix is in `server/src/utils/permissions.js`; the client mirrors it only for navigation and presentation. Express independently enforces every protected action.
 
-### Role-based access control
+## Security notes
 
-| Permission | Administrator | Inventory Staff | Viewer |
-| --- | :---: | :---: | :---: |
-| View dashboard / inventory / reports | ✓ | ✓ | ✓ |
-| Add / edit inventory items | ✓ | ✓ | — |
-| Record stock transactions | ✓ | ✓ | — |
-| Borrow / return equipment | ✓ | ✓ | — |
-| Manage categories | ✓ | — | — |
-| Manage users and roles | ✓ | — | — |
-| View activity logs | ✓ | — | — |
-| Archive items / adjust stock | ✓ | — | — |
-
-Permissions are enforced by Express middleware on **every** API route — hiding a button is never the only protection.
-
----
-
-## Security
-
-- **Password hashing** — bcrypt with 12 salt rounds; plain-text passwords are never stored or returned.
-- **Authentication** — signed JWT (7-day expiry) stored in an HTTP-only, same-site cookie, with a Bearer token fallback for embedded previews.
-- **Authorization** — `authenticate`, `requirePermission` and `requireRole` middleware on all protected routes.
-- **Account status** — deactivated accounts are rejected on login and on every authenticated request.
-- **Input validation** — express-validator rules on all write endpoints, plus Mongoose schema validation.
-- **NoSQL injection protection** — recursive sanitization strips `$`-prefixed and dotted keys from body/query/params; ObjectId parameters are validated.
-- **Data integrity** — atomic `findOneAndUpdate` operations with quantity guards; stock cannot go negative; failed audit writes trigger compensation.
-- **Audit trail** — every important mutation records the actor, action, affected record, details, IP and timestamp.
-- **Rate limiting** — login and API rate limits; Helmet security headers.
-- **Account management guardrails** — last active administrator protection and self-deactivation prevention.
-
----
+- Passwords are hashed with bcrypt; reset tokens are random, hashed in storage, one-time and expire after 20 minutes.
+- JWT sessions are stored in HTTP-only, `SameSite=Strict` cookies, with `Secure` enabled in production. Deactivation, role changes, password changes and logout invalidate sessions.
+- A production server refuses to start with a missing, short or placeholder JWT secret. Set `CLIENT_ORIGIN` to the exact allowed browser origin(s); unlisted Origin headers are rejected.
+- Helmet headers, JSON size limits, global and authentication-specific rate limits, recursive NoSQL-operator sanitization, field validation and explicit update whitelists protect the API.
+- Stock cannot be negative. All runtime quantity changes and corresponding ledger/borrow records commit in database transactions.
+- Do not expose development reset links, bootstrap credentials, SMTP credentials or `.env` files in production logs or source control.
 
 ## Project structure
 
+```text
+client/  React/Vite SPA, routes, role-aware layout, pages, styles and API client
+server/  Express API, auth/security middleware, Mongoose models, routes and seed data
 ```
-inventory-system/
-├── package.json                 # root scripts
-├── client/
-│   ├── index.html
-│   ├── vite.config.js
-│   └── src/
-│       ├── App.jsx              # routes + guards
-│       ├── main.jsx
-│       ├── styles.css           # design system
-│       ├── api/client.js
-│       ├── context/             # Auth, Toast, Theme providers
-│       ├── components/          # Layout, Sidebar, Topbar, Modal, common UI
-│       ├── pages/               # Login, Dashboard, Inventory, Transactions,
-│       │                        # Borrowing, Categories, Reports, Users,
-│       │                        # ActivityLogs, Settings, NotFound
-│       └── utils/               # permissions, formatting, constants
-└── server/
-    ├── src/
-    │   ├── index.js             # entry point
-    │   ├── app.js               # Express app
-    │   ├── config/db.js
-    │   ├── models/              # User, Category, Item, StockTransaction,
-    │   │                        # BorrowRecord, ActivityLog, Counter
-    │   ├── middleware/          # auth, sanitize, validate, errors
-    │   ├── routes/              # auth, users, categories, items, transactions,
-    │   │                        # borrows, dashboard, reports, activity
-    │   ├── services/            # (reserved for domain services)
-    │   ├── utils/               # ApiError, permissions, serializers, query helpers
-    │   └── seed.js
-    └── .env.example
-```
-
----
-
-## Design notes
-
-- **Sidebar** — hidden by default on desktop. A thin hot zone on the left edge reveals it on hover; it slides away when the pointer leaves. The topbar menu button pins/unpins it. On screens below 1024 px it becomes an off-canvas drawer opened by the menu button, with an overlay and Escape-to-close.
-- **Palette** — warm orange `#F28C28`, charcoal `#1E1E1E`, light grey `#F5F5F5`, white cards, subtle borders and shadows. Dark mode is available from the topbar and Settings.
-- **Typography** — system UI stack, 14 px base, restrained heading sizes.
-- **Feedback** — success/error toasts, loading skeletons, empty states, confirmation dialogs for destructive actions, inline field validation and server error mapping.
-- **Responsive** — tested at 1440 px, 1024 px, 768 px and 390 px; tables scroll horizontally, grids collapse, and the mobile drawer replaces the hover sidebar.
-- **Print** — dedicated print stylesheet for reports (hides navigation, filters and actions).
-
----
-
-## Scripts
-
-| Command | Description |
-| --- | --- |
-| `npm run setup` | Install server and client dependencies |
-| `npm run build` | Build the React client |
-| `npm start` | Start the Express server (serves API + built client) |
-| `npm run dev:server` | Start the API with `node --watch` |
-| `npm run dev:client` | Start the Vite dev server |
-| `npm run seed` | Seed the database |
-| `cd server && FORCE=1 npm run seed` | Clear and reseed the database |
-
----
-
-## Notes
-
-- The application is designed for a school environment; all demo data is fictional.
-- Reports are generated from live MongoDB records and reflect the current database state.
-- For production, use a strong `JWT_SECRET`, set `COOKIE_SECURE=true` behind HTTPS, and configure `CLIENT_ORIGIN` if the client is hosted separately.

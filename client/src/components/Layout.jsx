@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import api from '../api/client';
-import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 
@@ -18,7 +17,6 @@ function useMediaQuery(query) {
 }
 
 export function Layout() {
-  const { logout } = useAuth();
   const location = useLocation();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const canHover = useMediaQuery('(hover: hover) and (pointer: fine)');
@@ -33,7 +31,7 @@ export function Layout() {
       const data = await api.get('/dashboard/notifications');
       setNotifications(data);
     } catch {
-      /* non-critical */
+      // Notifications are supplementary; do not block the current page.
     }
   }, []);
 
@@ -42,7 +40,7 @@ export function Layout() {
   }, [loadNotifications, location.pathname]);
 
   useEffect(() => {
-    const interval = setInterval(loadNotifications, 60000);
+    const interval = setInterval(loadNotifications, 60_000);
     return () => clearInterval(interval);
   }, [loadNotifications]);
 
@@ -50,6 +48,10 @@ export function Layout() {
     setMobileOpen(false);
     setHovered(false);
   }, [location.pathname]);
+
+  useEffect(() => () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+  }, []);
 
   useEffect(() => {
     const handleKey = (event) => {
@@ -73,10 +75,13 @@ export function Layout() {
   const scheduleHide = () => {
     if (!isDesktop || !canHover || pinned) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setHovered(false), 160);
+    hideTimer.current = setTimeout(() => setHovered(false), 180);
   };
 
   const sidebarOpen = isDesktop ? pinned || hovered : mobileOpen;
+  const mainClass = isDesktop
+    ? sidebarOpen ? 'main-area sidebar-expanded' : 'main-area sidebar-collapsed'
+    : 'main-area sidebar-mobile';
 
   return (
     <div className="app-shell">
@@ -86,7 +91,6 @@ export function Layout() {
 
       <Sidebar
         open={sidebarOpen}
-        pinned={pinned}
         isMobile={!isDesktop}
         onClose={() => {
           if (isDesktop) {
@@ -96,13 +100,14 @@ export function Layout() {
             setMobileOpen(false);
           }
         }}
-        onLogout={logout}
+        onMouseEnter={revealSidebar}
+        onMouseLeave={scheduleHide}
         alertCount={notifications.total}
       />
 
-      <div className={`main-area ${pinned && isDesktop ? 'pinned' : ''}`.trim()}>
+      <div className={mainClass} onMouseEnter={scheduleHide}>
         <Topbar onMenuClick={handleMenuClick} notifications={notifications} onRefreshNotifications={loadNotifications} />
-        <main className="content" onMouseEnter={scheduleHide} aria-live="polite">
+        <main className="content" aria-live="polite">
           <Outlet />
         </main>
       </div>

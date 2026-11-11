@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 const ROLES = ['Administrator', 'Inventory Staff', 'Viewer'];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const userSchema = new mongoose.Schema(
   {
@@ -9,6 +10,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Full name is required'],
       trim: true,
+      minlength: [2, 'Full name must be at least 2 characters'],
       maxlength: [80, 'Name cannot exceed 80 characters'],
     },
     username: {
@@ -28,7 +30,10 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       maxlength: [120, 'Email cannot exceed 120 characters'],
       default: '',
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Enter a valid email address'],
+      validate: {
+        validator: (value) => !value || EMAIL_PATTERN.test(value),
+        message: 'Enter a valid email address',
+      },
     },
     passwordHash: {
       type: String,
@@ -42,8 +47,11 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
     isActive: { type: Boolean, default: true },
+    sessionVersion: { type: Number, default: 0, min: 0 },
     lastLoginAt: { type: Date, default: null },
     passwordChangedAt: { type: Date, default: null },
+    resetPasswordTokenHash: { type: String, default: undefined, select: false },
+    resetPasswordExpiresAt: { type: Date, default: undefined, select: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   {
@@ -52,11 +60,21 @@ const userSchema = new mongoose.Schema(
       virtuals: true,
       transform(_doc, ret) {
         delete ret.passwordHash;
+        delete ret.resetPasswordTokenHash;
+        delete ret.resetPasswordExpiresAt;
+        delete ret.sessionVersion;
         delete ret.__v;
         return ret;
       },
     },
   }
+);
+
+// Some administrator-created accounts may not yet have an email address. The
+// unique partial index still guarantees uniqueness for every real email.
+userSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { email: { $type: 'string', $gt: '' } } }
 );
 
 userSchema.methods.comparePassword = function comparePassword(candidate) {

@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
 let memoryServer = null;
 
 /**
  * Connects to MongoDB.
  * - If MONGODB_URI is set, uses that deployment (recommended for production).
- * - Otherwise starts an in-process MongoDB instance so the app is fully runnable.
+ * - Otherwise starts an in-process single-node replica set so multi-document
+ *   transactions are available during development and end-to-end testing.
  */
 export async function connectDB() {
   if (process.env.MONGODB_URI) {
@@ -19,7 +20,9 @@ export async function connectDB() {
     return mongoose.connection;
   }
 
-  memoryServer = await MongoMemoryServer.create();
+  memoryServer = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: 'wiredTiger' },
+  });
   const uri = memoryServer.getUri('school_inventory');
   await mongoose.connect(uri, { autoIndex: true });
   console.log(`MongoDB (in-memory) connected: ${mongoose.connection.name}`);

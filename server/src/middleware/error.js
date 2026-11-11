@@ -22,6 +22,10 @@ export function errorHandler(error, req, res, _next) {
     status = 409;
     const field = Object.keys(error.keyValue || {})[0] || 'field';
     message = `A record with that ${field} already exists.`;
+  } else if (error.code === 20 && /transaction numbers are only allowed/i.test(error.message || '')) {
+    status = 503;
+    message = 'Atomic stock changes require MongoDB to run as a replica set. Configure a replica-set deployment and try again.';
+    details = undefined;
   } else if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
     status = 401;
     message = 'Your session has expired. Please log in again.';

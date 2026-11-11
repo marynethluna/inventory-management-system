@@ -19,6 +19,7 @@ import borrowRoutes from './routes/borrow.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import reportRoutes from './routes/report.routes.js';
 import activityRoutes from './routes/activity.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(__dirname, '../../client/dist');
@@ -28,17 +29,50 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+const contentSecurityPolicy = helmet.contentSecurityPolicy.getDefaultDirectives();
+if (process.env.NODE_ENV !== 'production') contentSecurityPolicy['upgrade-insecure-requests'] = null;
 app.use(
   helmet({
-    contentSecurityPolicy: false, // the SPA is served from the same origin; CSP is handled by the host
+    contentSecurityPolicy: { directives: contentSecurityPolicy },
     crossOriginEmbedderPolicy: false,
-    frameguard: false, // allow the platform preview to embed the app in an iframe
   })
 );
+const configuredOrigins = (process.env.CLIENT_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const localOrigins = process.env.NODE_ENV === 'production'
+  ? []
+  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4000', 'http://127.0.0.1:4000'];
+const allowedOrigins = new Set([...configuredOrigins, ...localOrigins]);
+function isSameRequestOrigin(req, origin) {
+  try {
+    const forwardedHost = req.get('x-forwarded-host')?.split(',')[0].trim();
+    const requestHost = forwardedHost || req.get('host');
+    const forwardedProtocol = req.get('x-forwarded-proto')?.split(',')[0].trim();
+    const requestProtocol = forwardedProtocol || req.protocol;
+    if (!requestHost || !requestProtocol) return false;
+    return new URL(origin).origin === new URL(`${requestProtocol}://${requestHost}`).origin;
+  } catch {
+    return false;
+  }
+}
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && !allowedOrigins.has(origin) && !isSameRequestOrigin(req, origin)) {
+    return res.status(403).json({ message: 'This origin is not allowed to access the API.' });
+  }
+  next();
+});
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN ? process.env.CLIENT_ORIGIN.split(',') : true,
+    origin(origin, callback) {
+      // Requests without Origin are non-browser clients or same-origin tools.
+      callback(null, !origin || allowedOrigins.has(origin));
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
   })
 );
 app.use(express.json({ limit: '1mb' }));
@@ -56,6 +90,7 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
+// Public minimal liveness endpoint for load balancers; it exposes no database data.
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'school-inventory-api', timestamp: new Date().toISOString() });
 });
@@ -69,6 +104,7 @@ app.use('/api/borrows', borrowRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/activity-logs', activityRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Serve the built React application when it exists.
 if (fs.existsSync(clientDist)) {
