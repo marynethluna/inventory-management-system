@@ -1,0 +1,14 @@
+{
+  "name": "school-inventory-management-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MERN Inventory Management System with Access Control — Cavite State University, Don Severino de las Alas Campus",
+  "scripts": {
+    "setup": "npm install --prefix server && npm install --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "npm run start --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "seed": "npm run seed --prefix server"
+  }
+}
